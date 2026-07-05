@@ -1,0 +1,8 @@
+{
+  "allowKillEdge": true,
+  "allowShutdownWSL": true,
+  "allowCleanTemp": true,
+  "allowKillDocker": false,
+  "allowEmptyRecycleBin": false,
+  "allowCleanWindowsUpdateCache": false
+}
