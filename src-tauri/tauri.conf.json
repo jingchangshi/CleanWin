@@ -1,0 +1,32 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "CleanWin",
+  "version": "0.1.0",
+  "identifier": "com.cleanwin.app",
+  "build": {
+    "beforeDevCommand": "npm run dev:ui",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build:ui",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "CleanWin",
+        "width": 980,
+        "height": 720,
+        "minWidth": 820,
+        "minHeight": 600
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": [
+      "../diagnose-memory.ps1",
+      "../clean-memory.ps1",
+      "../config.json"
+    ]
+  }
+}

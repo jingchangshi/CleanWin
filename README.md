@@ -7,6 +7,24 @@ Windows 11 内存诊断与安全清理工具，适合主要使用 Edge、WSL2、
 - `diagnose-memory.ps1`：只诊断，不执行任何清理操作。
 - `clean-memory.ps1`：执行默认安全清理，并在危险操作前要求确认。
 - `config.json`：控制清理动作是否允许执行。
+- `src-tauri/`、`src/`：Tauri GUI 程序源码。
+
+## GUI 使用方式
+
+开发运行需要先安装 Node.js、Rust 和 Tauri 的 Windows 依赖。然后执行：
+
+```powershell
+npm install
+npm run dev
+```
+
+构建安装包：
+
+```powershell
+npm run build
+```
+
+GUI 中的“运行诊断”和“安全清理”会调用同目录下的 PowerShell 脚本。GUI 只执行默认安全清理；需要 Hyper-V、重启兜底、Docker、回收站、Windows Update 缓存等二次确认操作时，请使用 PowerShell 命令行运行脚本。
 
 ## 推荐使用方式
 

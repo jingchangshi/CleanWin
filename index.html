@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CleanWin</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div>
+          <h1>CleanWin</h1>
+          <p>Windows 11 内存诊断与安全清理</p>
+        </div>
+        <div id="status" class="status">就绪</div>
+      </header>
+
+      <main class="layout">
+        <aside class="sidebar">
+          <button id="diagnoseBtn" class="primary">运行诊断</button>
+          <button id="cleanBtn">安全清理</button>
+          <button id="clearBtn" class="secondary">清空输出</button>
+        </aside>
+
+        <section class="content">
+          <div class="metrics" aria-live="polite">
+            <div>
+              <span>已用内存</span>
+              <strong id="usedMemory">-</strong>
+            </div>
+            <div>
+              <span>Paged Pool</span>
+              <strong id="pagedPool">-</strong>
+            </div>
+            <div>
+              <span>Nonpaged Pool</span>
+              <strong id="nonpagedPool">-</strong>
+            </div>
+            <div>
+              <span>WSL</span>
+              <strong id="wslStatus">-</strong>
+            </div>
+          </div>
+
+          <pre id="output" class="output">点击“运行诊断”开始。</pre>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
