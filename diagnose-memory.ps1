@@ -68,9 +68,17 @@ function Show-MemoryBreakdown {
         Write-Host ("所有进程工作集占用合计：{0} GB" -f (Convert-BytesToGB $allProcessesWorkingSet))
 
         $memoryCounters = Get-CimInstance -ClassName Win32_PerfRawData_PerfOS_Memory -ErrorAction Stop
-        Write-Host ("系统 Cache Bytes：{0} GB" -f (Convert-BytesToGB $memoryCounters.CacheBytes))
-        Write-Host ("Paged Pool：{0} GB" -f (Convert-BytesToGB $memoryCounters.PoolPagedBytes))
-        Write-Host ("Nonpaged Pool：{0} GB" -f (Convert-BytesToGB $memoryCounters.PoolNonpagedBytes))
+        $cacheGB = Convert-BytesToGB $memoryCounters.CacheBytes
+        $pagedPoolGB = Convert-BytesToGB $memoryCounters.PoolPagedBytes
+        $nonpagedPoolGB = Convert-BytesToGB $memoryCounters.PoolNonpagedBytes
+
+        Write-Host ("系统 Cache Bytes：{0} GB" -f $cacheGB)
+        Write-Host ("Paged Pool：{0} GB" -f $pagedPoolGB)
+        Write-Host ("Nonpaged Pool：{0} GB" -f $nonpagedPoolGB)
+
+        if ($pagedPoolGB -ge 4 -or $nonpagedPoolGB -ge 1) {
+            Write-Warning "内核池占用偏高。Paged Pool 或 Nonpaged Pool 异常增大通常不是普通应用进程导致，常见原因是驱动、杀毒/安全软件、文件系统过滤驱动、虚拟化或硬件相关组件泄漏。"
+        }
     }
     catch {
         Write-Warning "无法读取系统内存拆分：$($_.Exception.Message)"
@@ -79,6 +87,22 @@ function Show-MemoryBreakdown {
     Write-Host "说明：任务管理器里的已用内存不等于 Top 进程内存相加。"
     Write-Host "原因包括：系统文件缓存、Standby Cache、内存压缩、内核分页/非分页池、驱动占用、GPU 共享内存，以及 WSL2/Docker 虚拟化保留内存。"
     Write-Host "Top 15 只显示进程工作集中的前 15 个进程，不能代表整机全部内存来源。"
+}
+
+function Show-TopPagedMemoryProcesses {
+    Write-Section "Top 10 进程提交/分页内存线索"
+    try {
+        Get-Process |
+            Sort-Object -Property PagedMemorySize64 -Descending |
+            Select-Object -First 10 @{Name = "进程名"; Expression = { $_.ProcessName } },
+                @{Name = "PID"; Expression = { $_.Id } },
+                @{Name = "PagedMemory(GB)"; Expression = { [math]::Round($_.PagedMemorySize64 / 1GB, 2) } },
+                @{Name = "WorkingSet(GB)"; Expression = { [math]::Round($_.WorkingSet64 / 1GB, 2) } } |
+            Format-Table -AutoSize
+    }
+    catch {
+        Write-Warning "无法读取进程分页内存信息：$($_.Exception.Message)"
+    }
 }
 
 function Test-ProcessExists {
@@ -129,9 +153,9 @@ function Show-WSLStatus {
             return
         }
 
-        $running = $text -split "(`r`n|`n|`r)" |
+        $running = @($text -split "(`r`n|`n|`r)" |
             ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -and ($_ -notmatch "Windows Subsystem for Linux") }
+            Where-Object { $_ -and ($_ -notmatch "Windows Subsystem for Linux") })
 
         if ($running.Count -gt 0) {
             Write-Host "正在运行的 WSL 发行版："
@@ -156,9 +180,20 @@ function Show-MemoryHints {
     Write-Host "6. 驱动泄漏：若重启后短时间内内存持续异常上涨，可能需要检查驱动或内核组件。"
 }
 
+function Show-CleanupRecommendations {
+    Write-Section "清理建议"
+    Write-Host "1. 进程工作集高：优先关闭明确的大进程，例如浏览器、IDE、编译任务。"
+    Write-Host "2. WSL2 / vmmemWSL 高：可运行 clean-memory.ps1，默认会执行 wsl --shutdown。"
+    Write-Host "3. Docker 高：先停止容器；如需关闭 Docker Desktop，在 config.json 开启 allowKillDocker 后再运行清理。"
+    Write-Host "4. Standby Cache / 系统缓存高：通常不需要清理，Windows 会在内存压力下自动回收。"
+    Write-Host "5. Paged Pool / Nonpaged Pool 高：这类内核内存不能靠结束普通进程安全释放；建议先重启验证，若反复上涨，应排查驱动、安全软件、VPN、文件同步、虚拟化组件，可用 PoolMon 或 Windows Performance Recorder 定位。"
+}
+
 Show-MemorySummary
 Show-TopMemoryProcesses
 Show-MemoryBreakdown
+Show-TopPagedMemoryProcesses
 Show-WSLStatus
 Show-ProcessChecks
 Show-MemoryHints
+Show-CleanupRecommendations

@@ -1,5 +1,6 @@
 ﻿param(
-    [switch]$IncludeHyperVServices
+    [switch]$IncludeHyperVServices,
+    [switch]$OfferRestartOnKernelPoolHigh
 )
 
 Set-StrictMode -Version Latest
@@ -29,6 +30,7 @@ function Convert-BytesToGB {
 function Get-MemorySnapshot {
     try {
         $os = Get-CimInstance -ClassName Win32_OperatingSystem
+        $memoryCounters = Get-CimInstance -ClassName Win32_PerfRawData_PerfOS_Memory -ErrorAction SilentlyContinue
         $totalBytes = [double]$os.TotalVisibleMemorySize * 1KB
         $freeBytes = [double]$os.FreePhysicalMemory * 1KB
         $usedBytes = $totalBytes - $freeBytes
@@ -39,6 +41,9 @@ function Get-MemorySnapshot {
             UsedGB = Convert-BytesToGB $usedBytes
             FreeGB = Convert-BytesToGB $freeBytes
             UsedPercent = $usedPercent
+            CacheGB = if ($null -ne $memoryCounters) { Convert-BytesToGB $memoryCounters.CacheBytes } else { $null }
+            PagedPoolGB = if ($null -ne $memoryCounters) { Convert-BytesToGB $memoryCounters.PoolPagedBytes } else { $null }
+            NonpagedPoolGB = if ($null -ne $memoryCounters) { Convert-BytesToGB $memoryCounters.PoolNonpagedBytes } else { $null }
         }
     }
     catch {
@@ -60,6 +65,11 @@ function Show-MemorySnapshot {
     Write-Host ("已用内存：{0} GB" -f $memory.UsedGB)
     Write-Host ("可用内存：{0} GB" -f $memory.FreeGB)
     Write-Host ("内存使用率：{0}%" -f $memory.UsedPercent)
+    if ($null -ne $memory.CacheGB) {
+        Write-Host ("系统 Cache Bytes：{0} GB" -f $memory.CacheGB)
+        Write-Host ("Paged Pool：{0} GB" -f $memory.PagedPoolGB)
+        Write-Host ("Nonpaged Pool：{0} GB" -f $memory.NonpagedPoolGB)
+    }
 }
 
 function Get-Config {
@@ -306,8 +316,78 @@ function Clear-WindowsUpdateCache {
     }
 }
 
+function Save-MemoryCleanupLog {
+    param(
+        [string]$Label,
+        $Snapshot
+    )
+
+    if ($null -eq $Snapshot) {
+        return
+    }
+
+    try {
+        $logPath = Join-Path -Path $PSScriptRoot -ChildPath "memory-cleanup.log"
+        $line = "{0}`t{1}`tUsed={2}GB`tFree={3}GB`tCache={4}GB`tPagedPool={5}GB`tNonpagedPool={6}GB" -f `
+            (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Label, $Snapshot.UsedGB, $Snapshot.FreeGB, $Snapshot.CacheGB, $Snapshot.PagedPoolGB, $Snapshot.NonpagedPoolGB
+        Add-Content -Path $logPath -Value $line -Encoding UTF8 -ErrorAction Stop
+        Write-Host "已写入日志：$logPath"
+    }
+    catch {
+        Write-Warning "写入清理日志失败：$($_.Exception.Message)"
+    }
+}
+
+function Test-KernelPoolHigh {
+    param($Snapshot)
+
+    if ($null -eq $Snapshot) {
+        return $false
+    }
+
+    return (($null -ne $Snapshot.PagedPoolGB -and $Snapshot.PagedPoolGB -ge 4) -or
+        ($null -ne $Snapshot.NonpagedPoolGB -and $Snapshot.NonpagedPoolGB -ge 1))
+}
+
+function Invoke-RestartIfKernelPoolHigh {
+    param(
+        [switch]$Enabled,
+        $Snapshot
+    )
+
+    if (-not $Enabled) {
+        return
+    }
+
+    if (-not (Test-KernelPoolHigh -Snapshot $Snapshot)) {
+        Write-Host "内核池未超过阈值，不建议重启。"
+        return
+    }
+
+    Write-Warning "检测到内核池占用偏高。普通清理无法安全释放 Paged Pool / Nonpaged Pool，重启是通用兜底释放方式。"
+    if (-not (Confirm-DangerousAction -ActionName "立即重启 Windows 以释放内核池内存")) {
+        Write-Skip "用户未确认重启。"
+        return
+    }
+
+    Invoke-SafeStep "重启 Windows" {
+        Restart-Computer -Force
+    }
+}
+
+function Show-CleanupScope {
+    Write-Section "清理范围说明"
+    Write-Host "本脚本默认只处理可安全释放的来源：WSL2、Edge 后台进程、用户临时目录、Windows Temp。"
+    Write-Host "系统缓存和 Standby Cache 通常由 Windows 自动回收，不默认强制清理。"
+    Write-Host "Paged Pool / Nonpaged Pool 属于内核内存，异常偏高通常来自驱动或内核组件，脚本不会尝试强制释放；建议重启后观察，反复上涨时用 PoolMon 或 WPR 排查。"
+    Write-Host "如需在内核池偏高时由脚本提示重启，可追加 -OfferRestartOnKernelPoolHigh。"
+}
+
 $config = Get-Config
+Show-CleanupScope
 Show-MemorySnapshot -Title "清理前内存"
+$beforeSnapshot = Get-MemorySnapshot
+Save-MemoryCleanupLog -Label "Before" -Snapshot $beforeSnapshot
 Stop-WSL -Config $config
 Stop-EdgeBackgroundProcesses -Config $config
 Clear-TempDirectories -Config $config
@@ -316,6 +396,9 @@ Stop-HyperVServices -Enabled:$IncludeHyperVServices
 Clear-RecycleBinSafe -Config $config
 Clear-WindowsUpdateCache -Config $config
 Show-MemorySnapshot -Title "清理后内存"
+$afterSnapshot = Get-MemorySnapshot
+Save-MemoryCleanupLog -Label "After" -Snapshot $afterSnapshot
+Invoke-RestartIfKernelPoolHigh -Enabled:$OfferRestartOnKernelPoolHigh -Snapshot $afterSnapshot
 
 Write-Host ""
 Write-Host "安全清理流程结束。未默认删除用户文件，也未 compact WSL vhdx。" -ForegroundColor Green

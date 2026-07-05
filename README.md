@@ -22,6 +22,12 @@ powershell -ExecutionPolicy Bypass -File .\diagnose-memory.ps1
 powershell -ExecutionPolicy Bypass -File .\clean-memory.ps1
 ```
 
+如果诊断显示 `Paged Pool` 或 `Nonpaged Pool` 明显偏高，并且希望脚本在普通清理后提示是否重启，可以运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\clean-memory.ps1 -OfferRestartOnKernelPoolHigh
+```
+
 部分操作可能需要管理员权限，尤其是清理 `C:\Windows\Temp`、停止服务、清理 Windows Update 缓存等。
 
 ## 默认安全清理会做什么
@@ -33,6 +39,7 @@ powershell -ExecutionPolicy Bypass -File .\clean-memory.ps1
 - 清理当前用户临时目录。
 - 清理 Windows Temp。
 - 显示清理前后的内存使用情况。
+- 将清理前后的内存快照写入 `memory-cleanup.log`。
 
 脚本发生错误时会继续执行后续步骤，并打印 warning。
 
@@ -74,3 +81,9 @@ powershell -ExecutionPolicy Bypass -File .\clean-memory.ps1 -IncludeHyperVServic
 WSL2 内存占用高时，通常可以通过 `wsl --shutdown` 释放。再次打开 Linux 终端、Docker 或依赖 WSL 的工具时，WSL 会重新启动。
 
 Standby Cache 是 Windows 正常的缓存机制，不一定是问题。系统会在应用需要内存时自动回收这部分缓存。
+
+如果重启后一段时间又出现高内存，并且 `Paged Pool` 或 `Nonpaged Pool` 持续上涨，通常说明存在内核池泄漏。普通进程清理无法安全释放这类内存，建议：
+
+- 先运行 `clean-memory.ps1` 释放 WSL、Edge 和临时目录等可安全回收来源。
+- 若内核池仍高，使用 `-OfferRestartOnKernelPoolHigh` 让脚本二次确认后重启，这是通用兜底释放方式。
+- 若问题反复出现，重点排查驱动、安全软件、VPN、文件同步、虚拟化组件，可使用 PoolMon 或 Windows Performance Recorder 定位具体来源。
