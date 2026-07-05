@@ -61,6 +61,26 @@ function Show-TopMemoryProcesses {
     }
 }
 
+function Show-MemoryBreakdown {
+    Write-Section "进程占用与系统内存说明"
+    try {
+        $allProcessesWorkingSet = (Get-Process | Measure-Object -Property WorkingSet64 -Sum).Sum
+        Write-Host ("所有进程工作集占用合计：{0} GB" -f (Convert-BytesToGB $allProcessesWorkingSet))
+
+        $memoryCounters = Get-CimInstance -ClassName Win32_PerfRawData_PerfOS_Memory -ErrorAction Stop
+        Write-Host ("系统 Cache Bytes：{0} GB" -f (Convert-BytesToGB $memoryCounters.CacheBytes))
+        Write-Host ("Paged Pool：{0} GB" -f (Convert-BytesToGB $memoryCounters.PoolPagedBytes))
+        Write-Host ("Nonpaged Pool：{0} GB" -f (Convert-BytesToGB $memoryCounters.PoolNonpagedBytes))
+    }
+    catch {
+        Write-Warning "无法读取系统内存拆分：$($_.Exception.Message)"
+    }
+
+    Write-Host "说明：任务管理器里的已用内存不等于 Top 进程内存相加。"
+    Write-Host "原因包括：系统文件缓存、Standby Cache、内存压缩、内核分页/非分页池、驱动占用、GPU 共享内存，以及 WSL2/Docker 虚拟化保留内存。"
+    Write-Host "Top 15 只显示进程工作集中的前 15 个进程，不能代表整机全部内存来源。"
+}
+
 function Test-ProcessExists {
     param([string]$Name)
 
@@ -92,16 +112,27 @@ function Show-ProcessChecks {
     }
 }
 
+function Convert-NativeOutputToText {
+    param([object[]]$Output)
+
+    $text = ($Output | Out-String)
+    return $text.Replace([string][char]0, "").Trim()
+}
+
 function Show-WSLStatus {
     Write-Section "WSL 运行状态"
     try {
-        $output = & wsl.exe --list --running 2>&1
+        $output = & wsl.exe --list --running --quiet 2>&1
+        $text = Convert-NativeOutputToText -Output $output
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "无法查询 WSL 状态：$output"
+            Write-Warning "无法查询 WSL 状态：$text"
             return
         }
 
-        $running = $output | Where-Object { $_ -and ($_ -notmatch "Windows Subsystem for Linux") }
+        $running = $text -split "(`r`n|`n|`r)" |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -and ($_ -notmatch "Windows Subsystem for Linux") }
+
         if ($running.Count -gt 0) {
             Write-Host "正在运行的 WSL 发行版："
             $running | ForEach-Object { Write-Host " - $_" }
@@ -127,6 +158,7 @@ function Show-MemoryHints {
 
 Show-MemorySummary
 Show-TopMemoryProcesses
+Show-MemoryBreakdown
 Show-WSLStatus
 Show-ProcessChecks
 Show-MemoryHints
